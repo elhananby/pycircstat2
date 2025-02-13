@@ -4,10 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycircstat2"
-version = "0.1.8"  
+version = "0.1.9"
 description = "Circular statistcs with Python."
-authors = [
-]
+authors = []
 requires-python = ">=3.9.0"
 dependencies = [
     "numpy",
@@ -15,8 +14,9 @@ dependencies = [
     "pandas",
     "matplotlib",
     "formulaic",
+    "statsmodels",
 ]
-readme = {file = "README.md", content-type = "text/markdown"}
+readme = { file = "README.md", content-type = "text/markdown" }
 
 [project.optional-dependencies]
 dev = [
@@ -30,5 +30,5 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = {find = {}}
+packages = { find = {} }
 include-package-data = true

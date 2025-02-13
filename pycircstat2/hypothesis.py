@@ -4,8 +4,11 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
+from statsmodels.multivariate.manova import MANOVA
 from scipy.special import comb, i0, iv
 from scipy.stats import chi2, f, norm, rankdata, vonmises, wilcoxon
+import numpy as np
+import pandas as pd
 
 from .descriptive import (
     circ_dist,
@@ -961,6 +964,154 @@ def circ_anova(
         print("--------------------------------------\n")
 
     return result
+
+
+def _simulate_manova_pvalue(
+    data: pd.DataFrame, test_stat: float, n_simulations: int = 9999, seed: int = None
+) -> float:
+    """
+    Calculate simulation-based p-value for MANOVA test on circular data.
+
+    Parameters:
+    -----------
+    data : pd.DataFrame
+        DataFrame containing 'cos', 'sin' and 'group' columns
+    test_stat : float
+        Observed Pillai's trace statistic
+    n_simulations : int
+        Number of simulations to perform
+    seed : int, optional
+        Random seed for reproducibility
+
+    Returns:
+    --------
+    float
+        Simulated p-value
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Count how many simulated test statistics are >= observed
+    count = 0
+    n_samples = len(data)
+
+    for _ in range(n_simulations):
+        # Generate uniform random angles
+        random_angles = np.random.uniform(0, 2 * np.pi, n_samples)
+
+        # Convert to components
+        sim_data = pd.DataFrame(
+            {
+                "cos": np.cos(random_angles),
+                "sin": np.sin(random_angles),
+                "group": data["group"],  # Keep original grouping
+            }
+        )
+
+        # Perform MANOVA on simulated data
+        sim_manova = MANOVA.from_formula("cos + sin ~ group", data=sim_data)
+        sim_results = sim_manova.mv_test()
+        sim_stat = sim_results.results["group"]["stat"].iloc[0]
+
+        if sim_stat >= test_stat:
+            count += 1
+
+    return (count + 1) / (n_simulations + 1)  # Add 1 to avoid p=0
+
+
+def circ_manova(
+    circs: list,
+    simulate_p: bool = None,
+    n_simulations: int = 9999,
+    verbose: bool = False,
+    seed: int = None,
+) -> dict:
+    """
+    Perform MANOVA test on two samples of circular data using statsmodels.
+
+    Parameters:
+    -----------
+    circs : list
+        List containing exactly two Circular objects with 'alpha' attributes
+    simulate_p : bool, optional
+        If True, uses simulation approach for p-value calculation.
+        If None, automatically uses simulation for n<15
+    n_simulations : int, optional
+        Number of simulations for p-value calculation (default 9999)
+    verbose : bool, optional
+        If True, prints additional test information
+    seed : int, optional
+        Random seed for reproducibility
+
+    Returns:
+    --------
+    dict
+        Contains:
+        - statistic: Pillai's trace statistic
+        - pvalue: corresponding p-value (theoretical or simulated)
+        - x_components: concatenated cosine components
+        - y_components: concatenated sine components
+        - method: string indicating which method was used
+    """
+    # Input validation
+    if len(circs) != 2:
+        raise ValueError("MANOVA requires exactly two samples.")
+
+    # Extract angles
+    angles1 = np.asarray(circs[0].alpha)
+    angles2 = np.asarray(circs[1].alpha)
+
+    # Validate angles
+    if np.any(np.isnan(angles1)) or np.any(np.isnan(angles2)):
+        raise ValueError("Angles contain NaN values")
+    if np.any(np.isinf(angles1)) or np.any(np.isinf(angles2)):
+        raise ValueError("Angles contain infinite values")
+
+    # Determine if simulation should be used
+    total_n = len(angles1) + len(angles2)
+    if simulate_p is None:
+        simulate_p = total_n < 15
+
+    # Convert to components
+    x1, y1 = np.cos(angles1), np.sin(angles1)
+    x2, y2 = np.cos(angles2), np.sin(angles2)
+
+    # Create DataFrame
+    df = pd.DataFrame(
+        {
+            "cos": np.concatenate([x1, x2]),
+            "sin": np.concatenate([y1, y2]),
+            "group": ["group1"] * len(angles1) + ["group2"] * len(angles2),
+        }
+    )
+
+    # Perform MANOVA
+    manova = MANOVA.from_formula("cos + sin ~ group", data=df)
+    test_results = manova.mv_test()
+
+    if verbose:
+        print(test_results)
+
+    # Extract Pillai's trace and p-value
+    pillai = test_results.results["group"]["stat"].iloc[0]
+    theoretical_pvalue = test_results.results["group"]["pvalue"].iloc[0]
+
+    if simulate_p:
+        pvalue = _simulate_manova_pvalue(df, pillai, n_simulations, seed)
+        method = "simulation"
+    else:
+        pvalue = theoretical_pvalue
+        method = "theoretical"
+
+    return {
+        "statistic": pillai,
+        "pvalue": pvalue,
+        "theoretical_pvalue": theoretical_pvalue if simulate_p else None,
+        "x_components": np.concatenate([x1, x2]),
+        "y_components": np.concatenate([y1, y2]),
+        "method": method,
+        "n_simulations": n_simulations if simulate_p else None,
+    }
 
 
 def angular_randomisation_test(
